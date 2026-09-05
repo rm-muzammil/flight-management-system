@@ -1,0 +1,6 @@
+# Pinned against what this code was actually written/tested against.
+# fastapi>=0.115 also works; tested here on 0.141.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+asyncpg>=0.29,<0.30
+pydantic[email]>=2.7,<3
