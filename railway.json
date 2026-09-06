@@ -4,7 +4,7 @@
     "builder": "RAILPACK",
     "watchPatterns": ["**/*"],
     "env": {
-      "MISE_PYTHON_GITHUB_ATTESTATIONS": "false"
+      "MISE_PYTHON_COMPILE": "1"
     }
   },
   "deploy": {
