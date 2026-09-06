@@ -1,0 +1,187 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "b47872c4-395b-4a73-b49e-7ffe68ae6fd5",
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -180,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT b.id AS booking_id, b.passenger_email, b.passenger_name, f.flight_number, f.origin, f.destination, f.departure_at FROM bookings b JOIN flights f ON f.id = b.flight_id WHERE f.departure_at BETWEEN NOW() + INTERVAL '23 hours 30 minutes' AND NOW() + INTERVAL '24 hours 30 minutes' AND b.status = 'confirmed' AND f.status != 'cancelled' AND NOT EXISTS (SELECT 1 FROM notification_log nl WHERE nl.booking_id = b.id AND nl.type = 'checkin_reminder');",
+        "options": {}
+      },
+      "id": "8ea2ef87-33aa-4f94-b240-f579ba4e0a0e",
+      "name": "Find Bookings Departing in ~24h",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        60,
+        -40
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "T1r90oJIjCboJAlC",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "7be2effe-4f39-4aca-89f3-4cac3d4a4c4b",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        300,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\n// NOTE: flights table has no origin_timezone/destination_timezone columns yet.\n// Showing UTC for now. If timezone columns are added later, restore proper\n// per-timezone conversion here instead of toUTCString().\nconst departure = new Date(item.departure_at);\nconst localDeparture = departure.toUTCString();\nreturn { json: { ...item, local_departure_display: localDeparture } };"
+      },
+      "id": "e968faf5-b894-4a8f-b016-23b508b5d833",
+      "name": "Format Departure Time (UTC)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.passenger_email }}",
+        "subject": "Check-in reminder: flight {{ $json.flight_number }} tomorrow",
+        "message": "Hi {{ $json.passenger_name }},\n\nThis is a reminder that your flight {{ $json.flight_number }} ({{ $json.origin }} to {{ $json.destination }}) departs at {{ $json.local_departure_display }} (UTC).\n\nPlease complete online check-in before you arrive at the airport.\n\nSafe travels,\nFlight Management Team",
+        "options": {}
+      },
+      "id": "8b284536-61a3-4c9b-8f38-45889eb59d86",
+      "name": "Send Check-in Reminder",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        780,
+        -40
+      ],
+      "webhookId": "c556a5c8-8488-44d9-9bce-9c184667a061",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "m6nJTwqssZ5QpuFs",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO notification_log (booking_id, type, sent_at) VALUES ('{{ $json.booking_id }}', 'checkin_reminder', NOW());",
+        "options": {}
+      },
+      "id": "e4b7647b-fe2b-47e8-bb2b-442fd19d4e33",
+      "name": "Log Reminder Sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1020,
+        -40
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "T1r90oJIjCboJAlC",
+          "name": "Postgres account 2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Hour": {
+      "main": [
+        [
+          {
+            "node": "Find Bookings Departing in ~24h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Bookings Departing in ~24h": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [
+          {
+            "node": "Format Departure Time (UTC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Departure Time (UTC)": {
+      "main": [
+        [
+          {
+            "node": "Send Check-in Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Check-in Reminder": {
+      "main": [
+        [
+          {
+            "node": "Log Reminder Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Reminder Sent": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ed7b919813459bfd27090a036caaf5501162a4a1a9c0383ce664beb0e8098d12"
+  }
+}

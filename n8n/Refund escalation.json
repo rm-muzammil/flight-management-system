@@ -1,0 +1,214 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "588cdc3e-ef1d-43d2-877b-5d9896d3fdb8",
+      "name": "Daily at 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT r.id AS refund_id, b.id AS booking_id, b.passenger_email,\n       f.flight_number, r.status, r.requested_at,\n       EXTRACT(DAY FROM NOW() - r.requested_at) AS age_days\nFROM refunds r\nJOIN bookings b ON b.id = r.booking_id\nJOIN flights f ON f.id = b.flight_id\nWHERE r.status NOT IN ('completed', 'denied')\n  AND r.requested_at < NOW() - INTERVAL '7 days'\n  AND NOT EXISTS (\n      SELECT 1 FROM notification_log nl\n      WHERE nl.refund_id = r.id AND nl.type = 'refund_escalation'\n  );",
+        "options": {}
+      },
+      "id": "3a3df70f-173f-404b-88a0-0b39564daf21",
+      "name": "Find Refunds Unresolved > 7 Days",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        -360,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "T1r90oJIjCboJAlC",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-has-rows",
+              "leftValue": "={{ $json.refund_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "47f48b96-0fd6-451f-86c2-02c19f1683f9",
+      "name": "Any Stale Refunds?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "de8c94dc-1ea1-4a3b-b324-8b27294f9ecb",
+      "name": "Aggregate Into Single Digest",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        120,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "rmmuzamilofficial@gmail.com",
+        "subject": "=Refund Escalation: {{ $json.data.length }} refund(s) unresolved > 7 days",
+        "message": "=The following refunds require human review (unresolved for over 7 days):\n\n{{ $json.data.map(r => `- Refund ${r.refund_id} | Booking ${r.booking_id} | Flight ${r.flight_number} | Status: ${r.status} | Age: ${r.age_days}`).join('\\n') }}\n\nPlease review and action in the admin portal.",
+        "options": {}
+      },
+      "id": "999a71b9-c0ce-418c-acd3-09bc6b8acb10",
+      "name": "Send Escalation Digest",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        360,
+        -100
+      ],
+      "webhookId": "191d55dc-806e-492c-833c-f173190cf161",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "m6nJTwqssZ5QpuFs",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO notification_log (refund_id, type, sent_at)\nSELECT unnest(string_to_array('{{ $(\"Aggregate Into Single Digest\").item.json.data.map(r => r.refund_id).join(\",\") }}', ','))::uuid, 'refund_escalation', NOW();",
+        "options": {}
+      },
+      "id": "85e7ddbd-d62b-4c41-b783-92adbb4a35b8",
+      "name": "Log Escalations Sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        600,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "T1r90oJIjCboJAlC",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "7a70f04d-03c2-453c-a3bc-5602b81721ae",
+      "name": "No Stale Refunds - Do Nothing",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        120,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Daily at 8am": {
+      "main": [
+        [
+          {
+            "node": "Find Refunds Unresolved > 7 Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Refunds Unresolved > 7 Days": {
+      "main": [
+        [
+          {
+            "node": "Any Stale Refunds?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Stale Refunds?": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Into Single Digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Stale Refunds - Do Nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Into Single Digest": {
+      "main": [
+        [
+          {
+            "node": "Send Escalation Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Escalation Digest": {
+      "main": [
+        [
+          {
+            "node": "Log Escalations Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ed7b919813459bfd27090a036caaf5501162a4a1a9c0383ce664beb0e8098d12"
+  }
+}

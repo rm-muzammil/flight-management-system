@@ -1,0 +1,247 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "3f313e03-f02f-42ec-a789-f10c8d26f167",
+      "name": "Every 2 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1200,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT DISTINCT seat_class_id FROM waitlist WHERE status = 'waiting';",
+        "options": {}
+      },
+      "id": "fb0fe174-e1f4-433a-b7f9-d7628bbe5a84",
+      "name": "Find Seat Classes With Waiting Passengers",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        -960,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "T1r90oJIjCboJAlC",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "cc82ce2f-8913-4901-9dca-5a076a308e2c",
+      "name": "Loop Over Seat Classes",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -720,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT promote_next_waitlisted('{{ $json.seat_class_id }}') AS promoted_waitlist_id;",
+        "options": {}
+      },
+      "id": "a414e5bb-0d4b-4a4f-9be4-c46764194931",
+      "name": "Call promote_next_waitlisted()",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        -480,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "T1r90oJIjCboJAlC",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-has-promotion",
+              "leftValue": "={{ $json.promoted_waitlist_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b8742466-cd70-45b2-9093-13f6917bd07d",
+      "name": "Was Someone Promoted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT w.id AS waitlist_id, w.passenger_name, w.passenger_email, w.promotion_expires_at, f.flight_number, f.origin, f.destination, f.departure_at FROM waitlist w JOIN flights f ON f.id = w.flight_id WHERE w.id = '{{ $json.promoted_waitlist_id }}';",
+        "options": {}
+      },
+      "id": "826deae3-2ccb-4f05-9b95-d744501e495c",
+      "name": "Fetch Promoted Passenger Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "T1r90oJIjCboJAlC",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.passenger_email }}",
+        "subject": "=Your seat on flight {{ $json.flight_number }} is available!",
+        "message": "=Hi {{ $json.passenger_name }},\n\nA seat has opened up on your waitlisted flight {{ $json.flight_number }} ({{ $json.origin }} to {{ $json.destination }}), departing {{ $json.departure_at }}.\n\nPlease confirm your seat before {{ $json.promotion_expires_at }} or it will be offered to the next passenger on the waitlist.\n\nThanks,\nFlight Management Team",
+        "options": {}
+      },
+      "id": "a7d18862-064f-41c7-9053-da7112d3196c",
+      "name": "Send Promotion Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        0
+      ],
+      "webhookId": "3d588a0c-b979-42d8-895d-d4c1a3470aef",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "m6nJTwqssZ5QpuFs",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 2 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Find Seat Classes With Waiting Passengers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Seat Classes With Waiting Passengers": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Seat Classes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Seat Classes": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Call promote_next_waitlisted()",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call promote_next_waitlisted()": {
+      "main": [
+        [
+          {
+            "node": "Was Someone Promoted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Was Someone Promoted?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Promoted Passenger Details",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Seat Classes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Promoted Passenger Details": {
+      "main": [
+        [
+          {
+            "node": "Send Promotion Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Promotion Email": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Seat Classes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ed7b919813459bfd27090a036caaf5501162a4a1a9c0383ce664beb0e8098d12"
+  }
+}
