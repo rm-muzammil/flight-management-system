@@ -19,6 +19,9 @@ from fastapi.responses import JSONResponse
 
 from app.database import close_pool, connect_pool, get_pool
 from app.routes import admin, booking
+from app.routes.rag import router as rag_router
+
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app.main")
@@ -53,6 +56,8 @@ app.add_middleware(
 
 app.include_router(admin.router)
 app.include_router(booking.router)
+app.include_router(rag_router, prefix="/api/v1")
+
 
 
 @app.get("/health", tags=["infra"])
