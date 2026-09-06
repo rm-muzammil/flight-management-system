@@ -5,3 +5,5 @@ uvicorn[standard]>=0.30
 asyncpg>=0.30.0
 pydantic[email]>=2.7,<3pinecone>=6.0.0
 google-generativeai>=0.8.0
+pinecone>=6.0.0
+google-generativeai>=0.8.0
