@@ -39,6 +39,41 @@ router = APIRouter(prefix="/api/v1", tags=["booking"])
 HOLD_DURATION = timedelta(minutes=15)
 
 
+async def _assemble_search_results(
+    conn: asyncpg.Connection, flight_rows: list[asyncpg.Record]
+) -> list[FlightSearchResult]:
+    """Shared by both /search and /flights — builds the same
+    FlightSearchResult shape (including the per-class seat_availability
+    subquery) from a set of already-fetched `flights` rows."""
+    results: list[FlightSearchResult] = []
+    for flight in flight_rows:
+        seat_rows = await conn.fetch(
+            """
+            SELECT id AS seat_class_id, class_name, allocated_seats,
+                   overbook_buffer,
+                   (allocated_seats + overbook_buffer - booked_seats - held_seats)
+                       AS available_seats
+            FROM seat_classes
+            WHERE flight_id = $1
+            ORDER BY class_name
+            """,
+            flight["id"],
+        )
+        results.append(
+            FlightSearchResult(
+                flight_id=flight["id"],
+                flight_number=flight["flight_number"],
+                origin=flight["origin"],
+                destination=flight["destination"],
+                departure_at=flight["departure_at"],
+                arrival_at=flight["arrival_at"],
+                status=flight["status"],
+                seat_availability=[SeatAvailability(**dict(r)) for r in seat_rows],
+            )
+        )
+    return results
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/search
 # ---------------------------------------------------------------------------
@@ -65,34 +100,44 @@ async def search_flights(
             destination.upper(),
             departure_date,
         )
+        return await _assemble_search_results(conn, flight_rows)
 
-        results: list[FlightSearchResult] = []
-        for flight in flight_rows:
-            seat_rows = await conn.fetch(
-                """
-                SELECT id AS seat_class_id, class_name, allocated_seats,
-                       overbook_buffer,
-                       (allocated_seats + overbook_buffer - booked_seats - held_seats)
-                           AS available_seats
-                FROM seat_classes
-                WHERE flight_id = $1
-                ORDER BY class_name
-                """,
-                flight["id"],
-            )
-            results.append(
-                FlightSearchResult(
-                    flight_id=flight["id"],
-                    flight_number=flight["flight_number"],
-                    origin=flight["origin"],
-                    destination=flight["destination"],
-                    departure_at=flight["departure_at"],
-                    arrival_at=flight["arrival_at"],
-                    status=flight["status"],
-                    seat_availability=[SeatAvailability(**dict(r)) for r in seat_rows],
-                )
-            )
-        return results
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/flights
+# ---------------------------------------------------------------------------
+
+@router.get("/flights", response_model=list[FlightSearchResult])
+async def list_upcoming_flights(
+    limit: int = Query(default=50, gt=0, le=200),
+    offset: int = Query(default=0, ge=0),
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> list[FlightSearchResult]:
+    """All upcoming flights (departure_at >= now()), ordered by
+    departure_at, paginated. Same response shape as /search — reuses
+    _assemble_search_results so the seat_availability math can't drift
+    between the two routes.
+
+    Judgment call worth flagging explicitly rather than deciding
+    silently: this excludes status='cancelled', matching /search's
+    behavior, on the reasoning that a cancelled flight isn't "upcoming"
+    in any bookable sense. If you want cancelled flights included (e.g.
+    for an admin-facing "all flights" view rather than a customer-facing
+    one), drop the `AND status <> 'cancelled'` clause below.
+    """
+    async with pool.acquire() as conn:
+        flight_rows = await conn.fetch(
+            """
+            SELECT * FROM flights
+            WHERE departure_at >= now()
+              AND status <> 'cancelled'
+            ORDER BY departure_at
+            LIMIT $1 OFFSET $2
+            """,
+            limit,
+            offset,
+        )
+        return await _assemble_search_results(conn, flight_rows)
 
 
 # ---------------------------------------------------------------------------
