@@ -1,4 +1,16 @@
-version: '3.8'
+version: "3.8"
+
+# =========================================================
+# Dual-Writer Flight Management System
+# Local orchestration: FastAPI backend + local Postgres (dev)
+#
+# - `postgres` is your existing local dev DB, seeded from ./sql.
+#   Use it by pointing DATABASE_URL in .env at it (see below).
+# - `backend` is the FastAPI app. In production/Railway, point
+#   DATABASE_URL at Supabase instead and you can skip the
+#   `postgres` service entirely (or leave it running for local
+#   testing against the same schema).
+# =========================================================
 
 services:
   postgres:
@@ -12,4 +24,70 @@ services:
       - "5432:5432"
     volumes:
       - ./sql:/docker-entrypoint-initdb.d
+      - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d flight_management"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - flight-mgmt-net
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: flight-mgmt-backend:latest
+    container_name: flight-mgmt-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # --- App ---
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PORT: 8000
+
+      # --- Database ---
+      # For LOCAL dev against the postgres service above, set in .env:
+      #   DATABASE_URL=postgresql://admin:adminpassword@postgres:5432/flight_management
+      # For talking to Supabase instead, set DATABASE_URL to your Supabase
+      # connection string and (optionally) stop the postgres service.
+      DATABASE_URL: ${DATABASE_URL}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+
+      # --- Pinecone (vector RAG) ---
+      PINECONE_API_KEY: ${PINECONE_API_KEY}
+      PINECONE_ENVIRONMENT: ${PINECONE_ENVIRONMENT}
+      PINECONE_INDEX_NAME: ${PINECONE_INDEX_NAME}
+
+      # --- Gemini (AI) ---
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-pro}
+
+      # --- n8n automations (external instance) ---
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL}
+      N8N_API_KEY: ${N8N_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - flight-mgmt-net
+
+networks:
+  flight-mgmt-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
